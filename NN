@@ -1,0 +1,118 @@
+import numpy as np
+import pandas as pd
+import keras
+from keras.models import Sequential
+from keras.layers import Dense, Dropout
+from keras.utils import np_utils
+from keras.wrappers.scikit_learn import KerasClassifier
+from keras.utils import plot_model
+import sklearn.preprocessing
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
+from sklearn.pipeline import Pipeline
+import matplotlib.pyplot as plt
+import pydot
+import graphviz
+
+# fix random seed for reproducibility
+seed = 7
+np.random.seed(seed)
+# load train and test file
+Xtrain = np.genfromtxt("train_data.csv", delimiter=",")
+Ytrain = np.genfromtxt("train_labels.csv", delimiter=",")
+Xtest = np.genfromtxt("test_data.csv", delimiter=",")
+plt.hist(Ytrain) 
+plt.title("Class distribution of train data")
+plt.show()
+
+# mean normalization
+Xtrain = sklearn.preprocessing.scale(Xtrain, axis=0)
+Xtest = sklearn.preprocessing.scale(Xtest, axis=0)
+
+# encode class values as integers
+encoder = LabelEncoder()
+encoder.fit(Ytrain)
+encoded_Y = encoder.transform(Ytrain)
+Ytrain = np_utils.to_categorical(encoded_Y, num_classes = 10)
+input_dim = Xtrain.shape[1]
+
+# create model to use with cross validation
+def nn_model():
+    model = Sequential()
+    model.add(Dense(512, input_dim=input_dim, activation='relu'))
+    model.add(Dropout(0.25))
+    model.add(Dense(256, activation='relu'))
+    model.add(Dropout(0.25))
+    model.add(Dense(128, activation='relu'))
+    model.add(Dropout(0.25))
+    model.add(Dense(10, activation='sigmoid'))
+    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    return model
+    
+    estimator = KerasClassifier(build_fn=nn_model, epochs=50, verbose=0)
+
+# fit the model with our data
+history = estimator.fit(Xtrain, Ytrain, batch_size=64)
+
+# do cross validation
+kfold = KFold(n_splits=10, shuffle=True, random_state=seed)
+results = cross_val_score(estimator, Xtrain, Ytrain, cv=kfold)
+print("Baseline: %.2f%% (%.2f%%)" % (results.mean()*100, results.std()*100))
+
+# summarize history for accuracy
+plt.plot(history.history['acc'])
+plt.title('model training accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.savefig('training accuracy.jpg', bbox_inches='tight')
+plt.show()
+
+# summarize history for loss
+plt.plot(history.history['loss'])
+plt.title('model training loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.savefig('training loss.jpg', bbox_inches='tight')
+plt.show()
+
+# predictions for the test data
+pred = estimator.predict(Xtest);
+# add 1 since Python index starts from 0
+fpred = pred + 1
+# compare the relative ratio of predicted classes to the training set
+pred[(pred == 1)].shape[0]/len(pred)
+Ytrain[(Ytrain == 1)].shape[0]/len(Ytrain)
+# predictions for class probabilities
+prob = estimator.predict_proba(Xtest)
+
+plt.hist(pred) 
+plt.title("Class distribution of test data - Neural networks method")
+plt.show()
+
+# make index column
+index = np.arange(1, len(pred) + 1)
+index_col = np.arange(1, len(pred) + 1).reshape(len(pred), 1)
+
+# save class predictions to file
+np.savetxt("nn-accuracy.csv", np.stack((index, fpred), axis=1), fmt='%d,%d', header="Sample_id,Sample_label", comments='')
+
+# save probabilities of class to file
+header = "Sample_id,Class_1,Class_2,Class_3,Class_4,Class_5,Class_6,Class_7,Class_8,Class_9,Class_10"
+fmt = '%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f'
+np.savetxt("nn-logloss.csv", np.concatenate((index_col, prob), axis=1), fmt=fmt, comments='', header=header)
+
+# exact same model for visualization 
+model = Sequential()
+model.add(Dense(512, input_dim=input_dim, activation='relu'))
+model.add(Dropout(0.25))
+model.add(Dense(256, activation='relu'))
+model.add(Dropout(0.25))
+model.add(Dense(128, activation='relu'))
+model.add(Dropout(0.25))
+model.add(Dense(10, activation='sigmoid'))
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+model.fit(Xtrain, Ytrain, batch_size=64, epochs=50, verbose=0)
+
+# visualize neural network model
+plot_model(model, to_file='model.png',show_shapes = True, show_layer_names = False)
